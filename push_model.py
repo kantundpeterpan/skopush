@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+
+#%%
 import argparse
 import json
 import os
@@ -10,9 +12,45 @@ import skops.io as sio
 from huggingface_hub import HfApi, create_repo
 
 import sys
-sys.path.append("/home/kantundpeterpan/projects")
-from frugalai.tools import *
+import importlib
+# sys.path.append("/home/kantundpeterpan/projects")
+# from tools import *
 
+# our_directory = Path(__file__).parent
+# sys.path.append(our_directory)
+# globals()['tools'] = importlib.import_module("tools")
+
+print('got here')
+
+#%%
+
+def load_module(pyfile: str, model_path: Path) -> int : 
+    """
+    Load a python module directly from a file.
+    
+    Args:
+      pyfile (str): Path to the python module
+    
+    Returns:
+      int: 0 if failed, 1 if successful
+    """
+    
+    file_path = Path(pyfile)
+    module_str = pyfile.split('/')[-1].replace(".py", "")
+    
+    parent = str(file_path.parent.resolve())
+    
+    if parent not in sys.path:
+       sys.path.append(parent)
+    
+    try:
+        globals()[module_str] = importlib.import_module(module_str) 
+        return 1
+    except Exception as e:
+        print(e)
+        return 0
+
+#%%
 def load_model_and_metadata(model_path):
     """
     Load a scikit-learn model and its metadata from a .skops file
@@ -110,6 +148,8 @@ def main():
     parser.add_argument("--private", action="store_true", help="Create a private repository")
     args = parser.parse_args()
 
+    print('load model')
+
     # Load model and metadata
     model, metadata = load_model_and_metadata(args.model_path)
     
@@ -151,4 +191,5 @@ def main():
         )
 
 if __name__ == "__main__":
+    print("got past mainguard")
     main()
