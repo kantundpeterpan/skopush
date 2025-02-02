@@ -5,26 +5,28 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
+
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import skops.io as sio
+from skops import hub_utils
+from skops import card
 from huggingface_hub import HfApi, create_repo
+from yaml import load, Loader
+import re
 
-import sys
 import importlib
-# sys.path.append("/home/kantundpeterpan/projects")
-# from tools import *
 
-# our_directory = Path(__file__).parent
-# sys.path.append(our_directory)
-# globals()['tools'] = importlib.import_module("tools")
 
 print('got here')
 
 #%%
 
-def load_module(pyfile: str, model_path: Path) -> int : 
+def load_module(pyfile: str) -> int : 
     """
     Load a python module directly from a file.
     
@@ -51,7 +53,7 @@ def load_module(pyfile: str, model_path: Path) -> int :
         return 0
 
 #%%
-def load_model_and_metadata(model_path):
+def load_model(model_path):
     """
     Load a scikit-learn model and its metadata from a .skops file
     
@@ -59,15 +61,39 @@ def load_model_and_metadata(model_path):
         model_path (str): Path to the .skops model file
     
     Returns:
-        tuple: (model, metadata) containing the loaded model and its metadata
+        model: the loaded model
     """
     
     trusted_types = sio.get_untrusted_types(file = model_path)
-    print(trusted_types)
+    # print(trusted_types)
     model = sio.load(model_path, trusted = trusted_types)
-    metadata = sio.get_metadata(model_path)
-    return model, metadata
 
+    return model
+
+#%%
+def init_repo(model_path: str, local_repo: str,
+              data: pd.DataFrame,
+              requirements: list[str]=None):
+
+    #parse and import dependencies    
+    repo_reqs = []
+    if requirements:
+        for dep in requirements:
+            module_name, namespace = dep.split(":")
+            globals()[namespace] = importlib.import_module(namespace)
+            req_str = "{0}={1}".format(module_name,
+                                       getattr(globals()[namespace],'__version__'))
+            repo_reqs.append(req_str)
+    
+    hub_utils.init(
+        model = model_path,
+        requirements = repo_reqs,
+        dst = local_repo,
+        task = config.get("model_card").get("task"),
+        data = data
+    )
+    
+#%%
 def create_confusion_matrix(y_true, y_pred, labels):
     """
     Create and save a confusion matrix plot
@@ -91,67 +117,109 @@ def create_confusion_matrix(y_true, y_pred, labels):
     plt.close()
     return output_path
 
-def generate_model_card(model_info, metrics, cm_path):
-    """
-    Generate a model card markdown file
+def obtain_ytest_ypred():
+    Xtest = pd.DataFrame(data.get('test'))   
+    return data.get('test')[config['dataset']['target_col']], model.predict(Xtest)
+
+def run_metrics(module: str, ytest, ypred):
+    print(module)
     
-    Args:
-        model_info (dict): Model metadata
-        metrics (dict): Model performance metrics
-        cm_path (str): Path to confusion matrix image
+    if module not in globals().keys():
+        globals()[module] = importlib.import_module(f)
+        
+    if module == 'sklearn':
+        metrics_module = getattr(globals()['sklearn'], 'metrics')
+        
+    else:
+        metrics_module = globals()[module]
+        
+    print(metrics_module)
     
-    Returns:
-        str: Path to generated model card
-    """
-    card_content = f"""---
-tags:
-- sklearn
-- skops
-- classification
-library_name: sklearn
----
-
-# Model Card for {model_info.get('name', 'Classification Model')}
-
-## Model Description
-
-{model_info.get('description', 'A scikit-learn classification model')}
-
-## Intended Use & Limitations
-
-This model is designed for classification tasks. Please refer to the metrics below for model performance.
-
-## Training Procedure
-
-The model was trained using scikit-learn version {model_info.get('sklearn_version', 'N/A')}.
-
-## Metrics
-
-```
-{json.dumps(metrics, indent=2)}
-```
-
-## Confusion Matrix
-
-![Confusion Matrix](confusion_matrix.png)
-"""
+    metrics = config.get("model_card").get('metrics').get(module)    
+    results = []
     
-    card_path = "README.md"
-    with open(card_path, "w") as f:
-        f.write(card_content)
-    return card_path
+    for met in metrics:
+        label, mfunc = met.split(":")
+        
+        kwargs = None
+        
+        if "(" in mfunc:
+            kwargre = re.compile(r'((?:\w+=[\'\"]?\w+[\'\"]?)+)')
+            kwargs = {k:eval(v) for (k,v) in map(lambda x: x.split("="), kwargre.findall(mfunc))}
+            mfunc = mfunc.split("(")[0]
+            
+        res = {label:getattr(metrics_module, mfunc)(ytest, ypred, **kwargs if kwargs else {})}
+        
+        print(label, mfunc, kwargs)
+        print(res)
+        
+        results.append(res)
+        
+    return results
 
+
+def create_model_card(model: object, local_repo: str):
+    model_card = card.Card(model,
+                           metadata = card.metadata_from_config(Path(local_repo)))
+    
+    # model evaluation
+    ytest, ypred = obtain_ytest_ypred()
+
+    ## metrics
+    for m in config.get("model_card").get("metrics").keys():
+        results = run_metrics(m, ytest, ypred)
+        for r in results:
+            model_card.add_metrics(**r)
+            
+
+    return model_card
+
+#%%
 def main():
     parser = argparse.ArgumentParser(description="Push scikit-learn model to Hugging Face Hub")
-    parser.add_argument("model_path", help="Path to .skops model file")
-    parser.add_argument("repo_name", help="Name of the Hugging Face repository")
-    parser.add_argument("--private", action="store_true", help="Create a private repository")
-    args = parser.parse_args()
+    parser.add_argument('config_yaml', help='Path to yaml config file')
+    # parser.add_argument("model_path", help="Path to .skops model file")
+    # parser.add_argument("repo_name", help="Name of the Hugging Face repository")
+    # parser.add_argument("--private", action="store_true", help="Create a private repository")
+    # args = parser.parse_args()
 
-    print('load model')
+    args = parser.parse_args()
+    
+    with open(args.config_yaml, 'r') as f:
+        config = load(f, Loader)
+
+    # import model dependencies before loading the model itself
+    if config['model_deps']:    
+        for pyfile in config['model_deps']:
+            print(pyfile)
+            load_module(pyfile)   
 
     # Load model and metadata
-    model, metadata = load_model_and_metadata(args.model_path)
+    model = load_model(config['model_path'])
+    
+    #load dataset
+    if config['dataset'].get("source") == 'datasets':
+        from datasets import load_dataset
+        data = load_dataset(config['dataset'].get('name'))
+    
+    elseif config['dataset'].get('source') == 'csv':
+        raise NotImplementedError("should be possible to point to csv file")
+    
+    #initialize local repo
+    
+    ## setup local repo directory
+    ## temporary directory
+    is_temp_repo = config.get('local_repo').get('name') == 'tmp'
+    if is_temp_rep:
+        import tempfile
+        repo_dir = tempfile.TemporaryDirectory()
+        local_repo = tmp_dir.name
+    
+    else:
+        repo_dir = Path(config.get('local_repo').get('name'))
+        local_repo = config.get('local_repo').get('name')
+        
+      
     
     # Create repository
     api = HfApi()
