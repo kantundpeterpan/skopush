@@ -1,11 +1,7 @@
 # skopush
 Heiner Atze
 
-<div style="border-radius=50% max-width=8%">
-
-![](./skopush_logo.png)
-
-</div>
+\<img src=“skopush_logo.png\>\`
 
 A tool for pushing scikit-learn models to the Hugging Face Hub with
 automated model card generation.
