@@ -340,6 +340,12 @@ def main():
             Path(f),
             dst = Path(local_repo)
         )
+        
+    # push skopush.yaml
+    hub_utils.add_files(
+        Path(args.config_yaml),
+        dst = Path(local_repo)
+    )
     
     # set create_remote to True if the repository doesn't exist remotely on the Hugging Face Hub
     hub_utils.push(
