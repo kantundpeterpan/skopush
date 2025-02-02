@@ -1,4 +1,4 @@
-# skopush
+![](./skopush_logo.png)
 
 A tool for pushing scikit-learn models to the Hugging Face Hub with automated model card generation.
 
