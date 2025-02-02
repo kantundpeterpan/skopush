@@ -75,6 +75,7 @@ def init_repo(model_path: str, local_repo: str,
               data: pd.DataFrame,
               requirements: list[str]=None):
 
+
     #parse and import dependencies    
     repo_reqs = []
     if requirements:
@@ -106,61 +107,153 @@ def create_confusion_matrix(y_true, y_pred, labels):
     Returns:
         str: Path to saved confusion matrix image
     """
+    
+    cm_config = config['model_card']['confusion_matrix']
+    
     cm = confusion_matrix(y_true, y_pred, labels=labels)
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots()
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
     disp.plot(ax=ax)
+    
     plt.title("Confusion Matrix")
     
-    output_path = "confusion_matrix.png"
-    plt.savefig(output_path)
-    plt.close()
+    #run any addition plt functions
+    if 'plt' in cm_config.keys():
+        for f in cm_config['plt']:
+            getattr(plt, f)(**{k:eval(v) for (k,v) in map(lambda x:x.split("="), cm_config['plt'][f])})
+    
+    # save the plot
+    output_path = Path(local_repo) / cm_config.get('filename', 'confusion_matrix.png')
+    plt.savefig(output_path, bbox_inches='tight')
+    
     return output_path
 
 def obtain_ytest_ypred():
-    Xtest = pd.DataFrame(data.get('test'))   
-    return data.get('test')[config['dataset']['target_col']], model.predict(Xtest)
+    """
+    Obtain the target values (y_test) and predicted values (y_pred) for the test dataset.
+
+    This function retrieves the test dataset from a global `data` dictionary and extracts
+    the target column specified in the global `config`. It then uses a global `model`
+    to make predictions on the test dataset.
+
+    Returns:
+        tuple: A tuple containing:
+            - y_test (pd.Series): The actual target values from the test dataset.
+            - y_pred (np.ndarray): The predicted values from the model.
+    """
+    if config['dataset']['source'] == 'datasets':
+        
+        # Get evaluation set from config
+        eval_set = config['dataset']['evaluate_on']
+        
+        # Get target column from config
+        target_col = config['dataset']['target_col']
+        
+        # Retrieve the test dataset as a DataFrame
+        Xtest = pd.DataFrame(data.get(eval_set))
+        
+        # Extract the target column and make predictions using the model
+        return data.get(eval_set)[target_col], model.predict(Xtest)
+
+    else:
+        raise NotImplementedError('Need better logic for other dataset sources')
+
+
 
 def run_metrics(module: str, ytest, ypred):
-    print(module)
-    
+    """
+    Dynamically run evaluation metrics on test data predictions using a specified module.
+
+    This function dynamically imports a metrics module (e.g., sklearn), retrieves metrics
+    defined in a global configuration, and computes them for given test labels (`ytest`)
+    and predictions (`ypred`).
+
+    Args:
+        module (str): The name of the module containing metric functions (e.g., 'sklearn').
+        ytest (array-like): The ground truth target values.
+        ypred (array-like): The predicted values from a model.
+
+    Returns:
+        list: A list of dictionaries where each dictionary contains:
+            - label (str): The name of the metric.
+            - result: The computed value of the metric.
+    """
+    print(module)  # Debugging: Print the module name
+
+    # Dynamically import the specified module if not already loaded
     if module not in globals().keys():
-        globals()[module] = importlib.import_module(f)
-        
+        globals()[module] = importlib.import_module(module)
+
+    # Retrieve the metrics module based on whether it's 'sklearn' or another module
     if module == 'sklearn':
         metrics_module = getattr(globals()['sklearn'], 'metrics')
-        
     else:
         metrics_module = globals()[module]
-        
-    print(metrics_module)
+
+    print(metrics_module)  # Debugging: Print the loaded metrics module
+
+    # Retrieve metric configurations from the global `config`
+    metrics = config.get("model_card").get("metrics").get(module)
     
-    metrics = config.get("model_card").get('metrics').get(module)    
+    # Initialize an empty list to store results
     results = []
-    
+
+    # Iterate through each metric defined in the configuration
     for met in metrics:
+        # Split metric definition into label and function name
         label, mfunc = met.split(":")
         
-        kwargs = None
-        
+        kwargs = None  # Initialize keyword arguments as None
+
+        # Check if additional arguments are provided in parentheses within `mfunc`
         if "(" in mfunc:
-            kwargre = re.compile(r'((?:\w+=[\'\"]?\w+[\'\"]?)+)')
-            kwargs = {k:eval(v) for (k,v) in map(lambda x: x.split("="), kwargre.findall(mfunc))}
-            mfunc = mfunc.split("(")[0]
+            # Use regex to extract key-value pairs from parentheses
+            kwargre = re.compile(r'(?:\w+=["\']?\w+["\']?)')
+            kwargs = {k: eval(v) for k, v in map(lambda x: x.split("="), kwargre.findall(mfunc))}
             
-        res = {label:getattr(metrics_module, mfunc)(ytest, ypred, **kwargs if kwargs else {})}
-        
-        print(label, mfunc, kwargs)
-        print(res)
-        
+            # Extract only the function name (before parentheses)
+            mfunc = mfunc.split("(")[0]
+
+        # Dynamically call the metric function with or without additional arguments
+        res = {label: getattr(metrics_module, mfunc)(ytest, ypred, **kwargs if kwargs else {})}
+
+        print(label, mfunc, kwargs)  # Debugging: Print details of each metric computation
+        print(res)  # Debugging: Print computed result
+
+        # Append result to results list
         results.append(res)
-        
-    return results
+
+    return results  # Return all computed metric results
+
 
 
 def create_model_card(model: object, local_repo: str):
+    
+    card_config = config['model_card']
+    
     model_card = card.Card(model,
                            metadata = card.metadata_from_config(Path(local_repo)))
+    
+    # model description
+    model_card.add(
+        **{"Model description":card_config.get("description").get("main")}
+    )
+    
+    ## check for subheadings of model description
+    desc_config = config['model_card']['description']
+    if len(desc_config.keys()) > 1: # 'main' must be included
+        for k in [k for k in desc_config.keys() if k != 'main']:
+            model_card.add(
+                **{'/'.join(["Model description", k]):desc_config.get(k)}
+            )
+    
+    
+    # any other sections
+    if 'sections' in card_config.keys():
+        for s in card_config['sections']:
+            model_card.add(
+                **{s:card_config['sections'][s]}
+            )
     
     # model evaluation
     ytest, ypred = obtain_ytest_ypred()
@@ -171,6 +264,14 @@ def create_model_card(model: object, local_repo: str):
         for r in results:
             model_card.add_metrics(**r)
             
+    # confusion matrix
+    cm_config = config['model_card']['confusion_matrix']
+    ## create the confusion matrix, save to local repo folder
+    cm_path = create_confusion_matrix(ytest, ypred, model.classes_)
+    ## add plot to card
+    model_card.add_plot(
+        **{cm_config.get("title", "Confusion Matrix"):cm_config.get("filename", "confusion_matrix.png")}
+    )
 
     return model_card
 
@@ -184,6 +285,8 @@ def main():
     # args = parser.parse_args()
 
     args = parser.parse_args()
+    
+    global config, model, data, local_repo
     
     with open(args.config_yaml, 'r') as f:
         config = load(f, Loader)
@@ -202,7 +305,7 @@ def main():
         from datasets import load_dataset
         data = load_dataset(config['dataset'].get('name'))
     
-    elseif config['dataset'].get('source') == 'csv':
+    elif config['dataset'].get('source') == 'csv':
         raise NotImplementedError("should be possible to point to csv file")
     
     #initialize local repo
@@ -210,54 +313,46 @@ def main():
     ## setup local repo directory
     ## temporary directory
     is_temp_repo = config.get('local_repo').get('name') == 'tmp'
-    if is_temp_rep:
+    
+    if is_temp_repo:
         import tempfile
         repo_dir = tempfile.TemporaryDirectory()
-        local_repo = tmp_dir.name
+        local_repo = repo_dir.name
     
     else:
         repo_dir = Path(config.get('local_repo').get('name'))
         local_repo = config.get('local_repo').get('name')
         
-      
+    # init local repo
+    init_repo(config['model_path'], local_repo,
+              data.get(config['dataset']['evaluate_on']),
+              config['deps'])
     
-    # Create repository
-    api = HfApi()
-    create_repo(args.repo_name, private=args.private, exist_ok=True)
+    # create the model card
+    mcard = create_model_card(model, local_repo)
     
-    # Prepare files for upload
-    files_to_upload = {
-        "model.skops": args.model_path,
-        "requirements.txt": "requirements.txt",
-        "README.md": "README.md"
-    }
+    # save mdoel card to repo
+    mcard.save(Path(local_repo) / "README.md")
     
-    # Generate and save confusion matrix
-    if hasattr(metadata, "test_data"):
-        cm_path = create_confusion_matrix(
-            metadata.test_data["y_true"],
-            metadata.test_data["y_pred"],
-            metadata.class_labels
+    # add additional files
+    for f in config['model_deps']:
+        hub_utils.add_files(
+            Path(f),
+            dst = Path(local_repo)
         )
-        files_to_upload["confusion_matrix.png"] = cm_path
     
-    # Generate model card
-    model_info = {
-        "name": metadata.get("name", "Classification Model"),
-        "description": metadata.get("description", ""),
-        "sklearn_version": metadata.get("sklearn_version", "")
-    }
-    metrics = metadata.get("metrics", {})
-    card_path = generate_model_card(model_info, metrics, "confusion_matrix.png")
+    # set create_remote to True if the repository doesn't exist remotely on the Hugging Face Hub
+    hub_utils.push(
+        repo_id=config['hf_repo'],
+        source=local_repo,
+        commit_message=config['push']['commit_message'],
+        create_remote=config['push']['create_remote'],
+        token = os.environ['HF_TOKEN']
+    )
     
-    # Upload files to Hugging Face
-    for dest, src in files_to_upload.items():
-        api.upload_file(
-            path_or_fileobj=src,
-            path_in_repo=dest,
-            repo_id=args.repo_name
-        )
-
+    if is_temp_repo:
+        repo_dir.cleanup()
+    
 if __name__ == "__main__":
     print("got past mainguard")
     main()
