@@ -1,6 +1,14 @@
+# skopush
+Heiner Atze
+
+<div style="border-radius=50% max-width=8%">
+
 ![](./skopush_logo.png)
 
-A tool for pushing scikit-learn models to the Hugging Face Hub with automated model card generation.
+</div>
+
+A tool for pushing scikit-learn models to the Hugging Face Hub with
+automated model card generation.
 
 ## Features
 
@@ -13,19 +21,18 @@ A tool for pushing scikit-learn models to the Hugging Face Hub with automated mo
 
 ## Installation
 
-```bash
+``` bash
 pip install skops huggingface-hub numpy pandas matplotlib scikit-learn pyyaml
 ```
 
 ## Usage
 
-The tool requires two main components:
-- A trained scikit-learn model saved in .skops format
-- A configuration YAML file
+The tool requires two main components: - A trained scikit-learn model
+saved in .skops format - A configuration YAML file
 
 To push a model to Hugging Face Hub:
 
-```bash
+``` bash
 HF_TOKEN=... python skopush.py config.yaml
 ```
 
@@ -33,7 +40,7 @@ HF_TOKEN=... python skopush.py config.yaml
 
 Create a YAML configuration file with the following structure:
 
-```yaml
+``` yaml
 hf_repo: "username/repository-name"
 local_repo:
   name: "repository-path"
@@ -46,29 +53,25 @@ dataset:
   evaluate_on: "test"
 ```
 
-**Required Environment Variables**
-- `HF_TOKEN`: Your Hugging Face authentication token
+**Required Environment Variables** - `HF_TOKEN`: Your Hugging Face
+authentication token
 
 ## Features in Detail
 
-**Model Card Generation**
-- Automatically generates comprehensive model cards
-- Includes model description, metrics, and visualizations
-- Supports custom sections and metadata
+**Model Card Generation** - Automatically generates comprehensive model
+cards - Includes model description, metrics, and visualizations -
+Supports custom sections and metadata
 
-**Metric Computation**
-- Dynamic computation of evaluation metrics
-- Supports sklearn metrics out of the box
-- Extensible to custom metric modules
+**Metric Computation** - Dynamic computation of evaluation metrics -
+Supports sklearn metrics out of the box - Extensible to custom metric
+modules
 
-**Visualization**
-- Automated confusion matrix generation
-- Configurable plot styling
-- Support for custom matplotlib configurations
+**Visualization** - Automated confusion matrix generation - Configurable
+plot styling - Support for custom matplotlib configurations
 
 ## Example Configuration
 
-```yaml
+``` yaml
 model_card:
   task: "text-classification"
   description:
@@ -84,9 +87,9 @@ model_card:
 
 ## Dependencies
 
-The tool manages both model dependencies and runtime dependencies:
-- Model dependencies: Python files needed for model loading
-- Runtime dependencies: Python packages required for execution
+The tool manages both model dependencies and runtime dependencies: -
+Model dependencies: Python files needed for model loading - Runtime
+dependencies: Python packages required for execution
 
 ## Contributing
 
